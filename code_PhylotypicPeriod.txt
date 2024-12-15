@@ -1,0 +1,216 @@
+% Here the code is used for calculating Phylostratum number of each meaize gene and Ka/ratio of maize genes
+% The key steps here included:
+% 1) To download/collect the genomes of protein sequences for generating phylostratum singlely and in-batch, after collectig the link to each genome or accession number to each genome in NCBI.
+% 2) To generate the Phylostratum number, a) generate sequcnes library of genomes by makebalstdb command, b) do BLASTP to maize protein sequences to all other species genomes (in protein sequences) one by one, c) based on the E-value of blastp, determine whether matched to each maize genes and asign the phylostratum accordingly.
+% 3) To calcualte the Ka/Ks ratio to each maize gene, a) determine the paired sequences between maize and another, by BLASTP. b) download the CDS sequences of these two speices. c) use MAFFT command to align the paired protein sequnces. c) Calculate the Ka/Ks ratio for paired genes, by pal2nal.pl and KaKs_Calculator. 
+% Remark: the code and command here is a mix-up of different program langurage, including bash code, phython, R for this engineering project. 
+
+% the methods or steps to calculate the TAI (transcriptomic age index) and TDI (trnacriptomic divergence index) is well established/presented in previous studies, and in Quint et al., 2012. doi:10.1038/nature11394
+
+
+# as there are lots of genomes to process, I did this manually one by one, such as collecting their link to each genome (protien sequnces) and download by wget command and some in their accession number, and download them one by one. 
+
+
+%%% download genomic protein sequences
+#.sh file, bash
+wget https://download.maizegdb.org/B73_RefGen_v3/Zea_mays.AGPv3.22.pep.all.fa.gz
+datasets download genome accession GCA_029449295.1 --include genome  --filename GCA_029449295.1.zip
+
+
+%%% Besides downloading the genomes one by one, there ncbi-genome-download can be used to download a set of (bacteria) genomes in batch from NCBI database 
+%  More about ncbi-genome-download, in https://github.com/kblin/ncbi-genome-download
+% .R file
+library(dplyr)
+GCA_list <- read.table("genomeGCA.txt") 
+# prepare a list genomes to download in GCA accession number
+cp_cmd <- as.data.frame(matrix(nrow = nrow(GCA_list),
+                               ncol = 4))
+cp_cmd$V1 <- "./datasets"
+cp_cmd$V2 <- "download"
+cp_cmd$V3 <- "genome"
+cp_cmd$V4 <- "accession"
+cp_cmd <- cbind(cp_cmd,GCA_list)
+cp_cmd$V6 <- "--include"
+cp_cmd$V7 <- "genome"
+cp_cmd$V8 <- "--filename"
+cp_cmd$V9 <- (paste0(as.list(GCA_list)$V1,".zip"))
+#save the cp_cmd as a shell script named "cp_cmd.sh"
+write.table(cp_cmd,
+            file = "cp_cmd.sh",
+            quote = FALSE,
+            sep = " ",
+            row.names = FALSE,
+            col.names = FALSE)
+genus_bac<-(strsplit(refseqbacteria$X1,split='_'))
+genus_list<-as.data.frame(matrix(nrow = length(genus_bac),ncol=1))
+for (i in 1:length(genus_bac)) {
+  genus_list[i,]<-lapply(genus_bac,as.character)[[i]][1]
+}
+genus_list1<-data.frame(t(genus_list[1,]))
+genus_uniq<-unique(genus_list1)
+for (i in 1:nrow(genus_uniq)) {
+  gli<-which(genus_list1$X1==genus_uniq[i,1])
+  genus_uniq[i,2]=gli[sample(length(gli),1)]
+}
+genus_select<-as.data.frame(t(as.data.frame(strsplit(refseqbacteria$X1[genus_uniq$V2],split = '/'))))
+write.table(genus_select,"genus_select.txt",row.names = FALSE,col.names = FALSE)
+write.table(genus_uniq[,1],"genus_uniq.txt",row.names = FALSE,col.names = FALSE)
+ncbi_cmd <- as.data.frame(matrix(nrow = nrow(genus_select),
+                               ncol = 6))
+ncbi_cmd$V1 <- "ncbi-genome-download"
+ncbi_cmd$V2 <- "--genera"
+ncbi_cmd$V3 <- "!"
+ncbi_cmd$V4 <- genus_select$V1
+ncbi_cmd$V5 <- "@"
+ncbi_cmd$V6 <- "bacteria"
+#save the cp_cmd as a shell script named "cp_cmd.sh"
+write.table(ncbi_cmd,
+            file = "ncbi_cmd.txt",
+            quote = FALSE,
+            sep = " ",
+            row.names = FALSE,
+            col.names = FALSE)
+
+#bash
+chmod +x cp_cmd.sh
+./cp_cmd.sh
+
+
+%%%%%% TAI - protein sequnces data building
+%%% for genomes in a folder
+%.py file
+import os
+files = os.listdir("PS/")
+for genome in files:
+	db_name = genome.strip('.pep.fa')
+	mdb = f"makeblastdb -in PS/{db_name}.pep.fa -dbtype prot -parse_seqids -out PS/{db_name}/{db_name}"
+	os.system(mdb)
+
+%%% protein sequnces data building for genomes listed in a txt file (in batch where genomes in different folder)
+%.py file
+import os
+import pandas as pd
+with open("bacteria_genomes.txt",'r') as f:
+	files = f.readlines()
+	for genome in files:
+		genomestrip=genome.strip()
+		filefa = os.listdir(f"bacteria/{genomestrip}/")
+		for filefas in filefa:
+			db_name = filefas.strip('.faa')
+			mdb = f"makeblastdb -in bacteria/{genomestrip}/{db_name}.faa -dbtype prot -parse_seqids -out bacteria/{genomestrip}/{db_name}"
+			os.system(mdb)
+
+%%% protein sequnces data building for genomes listed in a txt file in another way
+%.py file
+import os
+import pandas as pd
+files = pd.read_csv("bacteria_genomes.txt",sep='\t')
+#files = os.listdir("bacteria/")
+for genome in files:
+	print({genome})
+	filefa = os.listdir(f"bacteria/{genome}/")
+	for filefas in filefa:
+		db_name = filefas.strip('.faa')
+		mdb = f"makeblastdb -in bacteria/{genome}/{db_name}.faa -dbtype prot -parse_seqids -out bacteria/{genome}/{db_name}"
+		os.system(mdb)
+
+%%%%% TAI - protein sequences alignment by BLASTP to maize prtein sequnces
+%.sh file, /bin/bash
+files=$(ls -l ./ |awk '/^d/ {print $NF}')
+for f in $files;do
+	cd $f
+	for a in `cat /local/workdir/genomes/PS13/Zmv3.txt`;do # Zmv3.txt here is a list of maize genes (in protein)
+		blastp -query /local/workdir/genomes/PS13/Zmv3/$a -db  $f -outfmt 6 -num_alignments 1 >> $f.out 2>/dev/null
+	done
+	cd ..
+done
+
+% protein sequnces alignment to a specific database by BLASTP to maize prtein sequnces
+for a in `cat /local/workdir/genomes/PS13/Zmv3.txt`;do
+	blastp -query /local/workdir/genomes/PS13/Zmv3/$a -db  Als_v3.1 -outfmt 6 -num_alignments 1 >> Als_v3.1.out 2>/dev/null
+done
+% or alternative way for BLASTP to a specific database
+for a in `cat /local/workdir/genomes/PS13/Zmv3.txt`;do
+	echo $a
+	b=`echo $a|awk -F '.' '{print $1}'`
+	echo $b
+	blastp -query /local/workdir/genomes/PS13/Zmv3/$a -db  TIL25 -outfmt 6 -num_alignments 1 >> TIL25.out
+done
+
+% protein sequnces alignment of bacteria genomes by BLASTP to maize prtein sequnces
+ls /local/workdir/genomes/PS1/bacteria/ > bacteria_genome.txt
+cat bacteria_genome.txt | while read rows 
+do 
+c='/local/workdir/genomes/PS1/bacteria/'$rows 
+echo $c >> bacteria_genome.txt
+done
+
+cat bacteria_genome.txt | while read rows
+do
+cd $rows
+bacteriapdbf=`find ${rows} -name "*.pdb"`
+bacteriapdbs=`echo ${bacteriapdbf##*/}`
+bacteriapdbn=`echo ${bacteriapdbs%.*}`
+for a in `cat /local/workdir/genomes/PS13/Zmv3.txt`;do
+	blastp -query /local/workdir/genomes/PS13/Zmv3/$a -db  $bacteriapdbn -outfmt 6 -num_alignments 1 >> $bacteriapdbn.out1 2>/dev/null
+done
+done
+
+% protein sequnces alignment of archaea genomes by BLASTP to maize prtein sequnces
+ls /local/workdir/genomes/PS1/archaea/ > archaea_genome.txt
+cat archaea_genome.txt | while read rows 
+do 
+c='/local/workdir/genomes/PS1/archaea/'$rows 
+echo $c >> archaea_genome.txt
+done
+cat archaea_genome.txt | while read rows
+do
+cd $rows
+archaeapdbf=`find ${rows} -name "*.pdb"`
+archaeapdbs=`echo ${archaeapdbf##*/}`
+archaeapdbn=`echo ${archaeapdbs%.*}`
+for a in `cat /local/workdir/genomes/PS13/Zmv3.txt`;do
+	blastp -query /local/workdir/genomes/PS13/Zmv3/$a -db  $archaeapdbn -outfmt 6 -num_alignments 1 >> $archaeapdbn.out1 2>/dev/null
+done
+done
+
+% protein sequnces alignment of fungi genomes by BLASTP to maize prtein sequnces
+ls /local/workdir/genomes/PS2/fungi/ > fungi_genome.txt
+
+cat fungi_genome.txt | while read rows
+do
+cd $rows
+fungipdbf=`find ${rows} -name "*.pdb"`
+fungipdbs=`echo ${fungipdbf##*/}`
+fungipdbn=`echo ${fungipdbs%.*}`
+for a in `cat /local/workdir/genomes/PS13/Zmv3.txt`;do
+	blastp -query /local/workdir/genomes/PS13/Zmv3/$a -db  $fungipdbn -outfmt 6 -num_alignments 1 >> $fungipdbn.out 2>/dev/null
+done
+done 
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%#To calculate Ka/Ks ratio
+
+export PATH=/programs/mafft/bin:$PATH
+export PATH=/programs/pal2nal:$PATH
+export PATH=/local/workdir/KaKsCalculator/KaKs_Calculator3.0/src:$PATH
+
+% use MAFFT to align paired peptide sequences between maize genome and another genome 
+cat Zmv3_list.txt | while read rows % the Zmv3_list.txt is a list of genes to calculate the Ka/Ks ratio
+do
+mafft-linsi $rows > $rows.out
+done
+
+
+% use pal2nal.pl. codin2kaks.pl and KaKs to calcualte the Ka/Ks ratio of paired genes
+cat embryo_pep_cds.txt | while read rows % in embryo_pep_cds.txt, there listed the paired genes which produced by BLASTP
+do
+pepgn=`echo $rows | awk '{print $1}'` 
+cdsgn=`echo $rows | awk '{print $2}'`
+pal2nal.pl ./pairwisep/$pepgn ./pairwisecds/$cdsgn -nogap > $pepgn.condon
+perl ./codon2kaks.pl $pepgn.condon > $pepgn.axt
+KaKs -i $pepgn.axt -o $pepgn.axt.kaks
+done
+

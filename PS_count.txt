@@ -1,0 +1,14 @@
+index	PSn_proembryo	PSn_initiationnetwork	PSn_Stage1Scu	PSn_Stage1Col	PSn_Embryodays	PSn_Seedlingleaves
+1	21	29	491	147	74	22
+2	22	36	222	64	46	17
+3	0	12	38	19	9	2
+4	18	37	171	53	34	12
+5	1	3	18	6	2	1
+6	1	5	30	6	5	1
+7	6	3	22	8	11	1
+8	0	1	12	5	3	0
+9	12	2	22	4	11	1
+10	3	1	3	3	2	0
+11	4	0	12	2	8	3
+12	1	0	1	1	4	1
+13	2	1	16	12	32	12
